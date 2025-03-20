@@ -1,35 +1,55 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
+# ESP32-S3 LoRa Transmitter
 
-# _Sample project_
+## Overview
+This project is an ESP32-S3-based LoRa transmitter for the xiao esp32s3 & wio-sx1262 that collects battery voltage and temperature data using an ADC and an NTC sensor, then transmits the data using an SX1262 LoRa module.
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+## Features
+- Reads battery voltage via ADC
+- Measures temperature using an NTC sensor
+- Sends data over LoRa using the SX1262 module
+- Enabled deep sleep to send data every 15 min.
 
-This is the simplest buildable example. The example is used by command `idf.py create-project`
-that copies the project to user specified path and set it's name. For more information follow the [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project)
+## Hardware Requirements
+- ESP32-S3 Development Board
+- SX1262 LoRa Module
+- NTC Thermistor (10kΩ)
+- Battery (for ADC measurement)
+- Supporting circuitry (resistors, connectors)
 
+## Pin Configuration
+| Signal | ESP32-S3 Pin |
+|--------|-------------|
+| MOSI | 9 |  # SPI MOSI Pin
+| MISO | 8 |  # SPI MISO Pin
+| SCK | 7 |  # SPI Clock Pin
+| NSS | 41 |  # LoRa Chip Select Pin
+| RST | 42 |  # LoRa Reset Pin
+| BUSY | 40 |  # LoRa Busy Pin
+| ANT SW | 38 |  # Antenna Switch Pin
+| Battery ADC | 1 |  # ADC Pin for Battery Voltage Measurement
+| Temp ADC | 2 |  # ADC Pin for Temperature Measurement
 
+## Software Requirements
+- ESP-IDF  # Required development framework
+- FreeRTOS  # Real-time operating system for ESP32
+- SX1262 LoRa Library  # LoRa module driver library
 
-## How to use example
-We encourage the users to use the example as a template for the new projects.
-A recommended way is to follow the instructions on a [docs page](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#start-a-new-project).
+## Installation
+1. Clone the repository.
+2. [Set up ESP-IDF environment.](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#setting-up-development-environment)
+3. Build and flash the firmware:
+   ```sh
+   idf.py build  # Compiles the firmware
+   idf.py flash monitor  # Flashes the firmware and starts monitoring
+   ```
 
-## Example folder contents
+## Usage
+- The system initializes the ADC and LoRa module.
+- It periodically reads the temperature and battery voltage.
+- The collected data is transmitted over LoRa.
+- Sleeps for 15 mins
+- Logs are displayed via the serial monitor.
 
-The project **sample_project** contains one source file in C language [main.c](main/main.c). The file is located in folder [main](main).
+## License
+This project is licensed under the MIT License.
 
-ESP-IDF projects are built using CMake. The project build configuration is contained in `CMakeLists.txt`
-files that provide set of directives and instructions describing the project's source files and targets
-(executable, library, or both). 
-
-Below is short explanation of remaining files in the project folder.
-
-```
-├── CMakeLists.txt
-├── main
-│   ├── CMakeLists.txt
-│   └── main.c
-└── README.md                  This is the file you are currently reading
-```
-Additionally, the sample project contains Makefile and component.mk files, used for the legacy Make based build system. 
-They are not used or needed when building with CMake and idf.py.
