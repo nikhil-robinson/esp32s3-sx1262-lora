@@ -41,17 +41,18 @@ void task_rx(void *pvParameters)
 void app_main()
 {
     // Initialize LoRa
+    ESP_LOGI(TAG, "SX1262 LoRa Module RX Test");
     LoRaInit(ESP32_S3_MISO_PIN, ESP32_S3_MOSI_PIN, ESP32_S3_SCK_PIN, ESP32_S3_NSS_PIN, ESP32_S3_RST_PIN, ESP32_S3_BUSY_PIN, ESP32_S3_ANTENA_SW_PIN);
     int8_t txPowerInDbm = 22;
 
-    uint32_t frequencyInHz = 433000000;
-    ESP_LOGI(TAG, "Frequency is 433MHz");
+    uint32_t frequencyInHz = 866000000;
+	ESP_LOGI(TAG, "Frequency is 866MHz");
 
-    ESP_LOGW(TAG, "Disable TCXO");
-    float tcxoVoltage = 0.0;      // don't use TCXO
-    bool useRegulatorLDO = false; // use only LDO in all modes
+    ESP_LOGW(TAG, "Enable TCXO");
+	float tcxoVoltage = 3.3; // use TCXO
+	bool useRegulatorLDO = true; // use DCDC + LDO
 
-    // LoRaDebugPrint(true);
+    LoRaDebugPrint(true);
     if (LoRaBegin(frequencyInHz, txPowerInDbm, tcxoVoltage, useRegulatorLDO) != 0)
     {
         ESP_LOGE(TAG, "Does not recognize the module");
@@ -63,13 +64,12 @@ void app_main()
 
     uint8_t spreadingFactor = 7;
     uint8_t bandwidth = 4;
-    uint8_t codingRate = 1;
+    uint8_t codingRate = 5;
     uint16_t preambleLength = 8;
     uint8_t payloadLen = 0;
     bool crcOn = true;
     bool invertIrq = false;
     LoRaConfig(spreadingFactor, bandwidth, codingRate, preambleLength, payloadLen, crcOn, invertIrq);
-
 
     xTaskCreate(&task_rx, "RX", 1024 * 4, NULL, 5, NULL);
 }

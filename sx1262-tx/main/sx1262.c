@@ -330,7 +330,8 @@ bool LoRaSend(uint8_t *pData, int16_t len, uint8_t mode)
 			irqStatus = GetIrqStatus();
 			while ( (!(irqStatus & SX126X_IRQ_TX_DONE)) && (!(irqStatus & SX126X_IRQ_TIMEOUT)) )
 			{
-				delay(1);
+				// delay(1);
+				vTaskDelay(1);
 				irqStatus = GetIrqStatus();
 			}
 			if (debugPrint) {
@@ -808,7 +809,8 @@ bool WaitForIdle(unsigned long timeout, char *text, bool stop)
 	delayMicroseconds(1);
 	while(xTaskGetTickCount() - start < (timeout/portTICK_PERIOD_MS)) {
 		if (gpio_get_level(SX126x_BUSY) == 0) break;
-		delayMicroseconds(1);
+		// delayMicroseconds(1);
+		vTaskDelay(1);
 	}
 	if (gpio_get_level(SX126x_BUSY)) {
 		if (stop) {

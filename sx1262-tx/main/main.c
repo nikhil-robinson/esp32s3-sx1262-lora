@@ -21,18 +21,18 @@ static const char *TAG = "MAIN";
 
 void task_tx(void *pvParameters)
 {
-    ESP_LOGI(pcTaskGetName(NULL), "Start");
+    ESP_LOGI(TAG, "Start");
     uint8_t buf[256]; // Maximum Payload size of SX1261/62/68 is 255
     while (1)
     {
         TickType_t nowTick = xTaskGetTickCount();
         int txLen = sprintf((char *)buf, "Hello World %" PRIu32, nowTick);
-        ESP_LOGI(pcTaskGetName(NULL), "%d byte packet sent...", txLen);
+        ESP_LOGI(TAG, "%d byte packet sent...", txLen);
 
         // Wait for transmission to complete
         if (LoRaSend(buf, txLen, SX126x_TXMODE_SYNC) == false)
         {
-            ESP_LOGE(pcTaskGetName(NULL), "LoRaSend fail");
+            ESP_LOGE(TAG, "LoRaSend fail");
         }
 
         // Do not wait for the transmission to be completed
@@ -41,7 +41,7 @@ void task_tx(void *pvParameters)
         int lost = GetPacketLost();
         if (lost != 0)
         {
-            ESP_LOGW(pcTaskGetName(NULL), "%d packets lost", lost);
+            ESP_LOGW(TAG, "%d packets lost", lost);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -51,17 +51,18 @@ void task_tx(void *pvParameters)
 void app_main()
 {
     // Initialize LoRa
+    ESP_LOGI(TAG, "SX1262 LoRa Module TX Test");
     LoRaInit(ESP32_S3_MISO_PIN, ESP32_S3_MOSI_PIN, ESP32_S3_SCK_PIN, ESP32_S3_NSS_PIN, ESP32_S3_RST_PIN, ESP32_S3_BUSY_PIN, ESP32_S3_ANTENA_SW_PIN);
     int8_t txPowerInDbm = 22;
 
-    uint32_t frequencyInHz = 433000000;
-    ESP_LOGI(TAG, "Frequency is 433MHz");
+    uint32_t frequencyInHz = 866000000;
+	ESP_LOGI(TAG, "Frequency is 866MHz");
 
-    ESP_LOGW(TAG, "Disable TCXO");
-    float tcxoVoltage = 0.0;      // don't use TCXO
-    bool useRegulatorLDO = false; // use only LDO in all modes
+    ESP_LOGW(TAG, "Enable TCXO");
+	float tcxoVoltage = 3.3; // use TCXO
+	bool useRegulatorLDO = true; // use DCDC + LDO
 
-    // LoRaDebugPrint(true);
+    LoRaDebugPrint(true);
     if (LoRaBegin(frequencyInHz, txPowerInDbm, tcxoVoltage, useRegulatorLDO) != 0)
     {
         ESP_LOGE(TAG, "Does not recognize the module");
@@ -73,7 +74,7 @@ void app_main()
 
     uint8_t spreadingFactor = 7;
     uint8_t bandwidth = 4;
-    uint8_t codingRate = 1;
+    uint8_t codingRate = 5;
     uint16_t preambleLength = 8;
     uint8_t payloadLen = 0;
     bool crcOn = true;
