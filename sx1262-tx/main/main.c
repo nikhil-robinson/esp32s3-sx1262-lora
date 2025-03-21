@@ -24,8 +24,6 @@
 #include "onewire_bus.h"
 
 static const char *TAG = "MAIN";
-#define EXAMPLE_ONEWIRE_BUS_GPIO    18
-#define EXAMPLE_ONEWIRE_MAX_DS18B20 2
 
 
 
@@ -39,10 +37,10 @@ static const char *TAG = "MAIN";
 #define ESP32_S3_ANTENA_SW_PIN 38
 
 // Define GPIO pins and ADC channels for battery and temperature sensing
-#define ESP32_S3_BATTERY_ADC_PIN 1
-#define ESP32_S3_BATTERY_ADC_CHANNEL ADC_CHANNEL_0
-#define ESP32_S3_TEMPERATURE_ADC_PIN 2
-#define ESP32_S3_TEMPERATURE_ADC_CHANNEL ADC_CHANNEL_1
+#define ESP32_S3_BATTERY_ADC_PIN 5
+#define ESP32_S3_BATTERY_ADC_CHANNEL ADC_CHANNEL_4
+#define ESP32_S3_BATTERY_SAMPLE_NUMBER 20
+#define ESP32_S3_TEMPERATURE_ONEWIRE_BUS_GPIO 3
 
 // Handles for ADC and NTC device
 adc_oneshot_unit_handle_t adc1_handle;
@@ -76,7 +74,7 @@ static void ds18b20_sensor_detect(void)
     // install 1-wire bus
     onewire_bus_handle_t bus = NULL;
     onewire_bus_config_t bus_config = {
-        .bus_gpio_num = EXAMPLE_ONEWIRE_BUS_GPIO,
+        .bus_gpio_num = ESP32_S3_TEMPERATURE_ONEWIRE_BUS_GPIO,
     };
     onewire_bus_rmt_config_t rmt_config = {
         .max_rx_bytes = 10, // 1byte ROM command + 8byte ROM number + 1byte device command
@@ -221,9 +219,6 @@ void device_init()
     esp_rom_gpio_pad_select_gpio(ESP32_S3_BATTERY_ADC_PIN);
     gpio_set_direction(ESP32_S3_BATTERY_ADC_PIN, GPIO_MODE_INPUT);
 
-    esp_rom_gpio_pad_select_gpio(ESP32_S3_TEMPERATURE_ADC_PIN);
-    gpio_set_direction(ESP32_S3_TEMPERATURE_ADC_PIN, GPIO_MODE_INPUT);
-
     start_adc();
     adc1_config(ESP32_S3_BATTERY_ADC_CHANNEL);
 
@@ -290,15 +285,23 @@ void task_tx(void *pvParameters)
 
     TickType_t nowTick = xTaskGetTickCount();
     int adc_raw = 0, voltage =0;
+    uint32_t adc_samples = 0;
     ESP_ERROR_CHECK(ds18b20_trigger_temperature_conversion(s_ds18b20s));
     ESP_ERROR_CHECK(ds18b20_get_temperature(s_ds18b20s, &s_temperature));
     ESP_LOGI(TAG, "temperature read from DS18B20: %.2fC", s_temperature);
-    adc1_read(ESP32_S3_BATTERY_ADC_CHANNEL, &adc_raw);
+    for (size_t i = 0; i < ESP32_S3_BATTERY_SAMPLE_NUMBER; i++)
+    {
+        adc1_read(ESP32_S3_BATTERY_ADC_CHANNEL, &adc_raw);
+        adc_samples += adc_raw;
+    }
+    adc_raw = adc_samples / ESP32_S3_BATTERY_SAMPLE_NUMBER;
     ESP_LOGI(TAG, "Adc raw: %d", adc_raw);
+    
     adc1_read_voltage(adc_raw, &voltage);
     ESP_LOGI(TAG, "Battery voltage: %d", voltage);
 
-    voltage = map(voltage, 0, 4095, 0, 100);
+    voltage = map(voltage, 0, 1300, 0, 100);
+
 
     int txLen = sprintf((char *)buf, "[%lu] ID %lu TEMP %f BAT %d", nowTick, id, s_temperature, voltage);
     ESP_LOGI(TAG, "%d byte packet sent...", txLen);
