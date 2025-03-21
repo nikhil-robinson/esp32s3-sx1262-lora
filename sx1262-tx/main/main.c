@@ -6,7 +6,6 @@
 #include "esp_log.h"
 #include "esp_adc/adc_oneshot.h"
 #include "driver/gpio.h"
-#include "ntc_driver.h"
 #include "esp_random.h"
 #include <stdio.h>
 #include <time.h>
@@ -21,8 +20,14 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "sx1262.h"
+#include "ds18b20.h"
+#include "onewire_bus.h"
 
 static const char *TAG = "MAIN";
+#define EXAMPLE_ONEWIRE_BUS_GPIO    18
+#define EXAMPLE_ONEWIRE_MAX_DS18B20 2
+
+
 
 // Define GPIO pins for SPI interface and LoRa module
 #define ESP32_S3_MOSI_PIN 9
@@ -41,9 +46,13 @@ static const char *TAG = "MAIN";
 
 // Handles for ADC and NTC device
 adc_oneshot_unit_handle_t adc1_handle;
-ntc_device_handle_t ntc = NULL;
+adc_cali_handle_t adc1_cali_handle = NULL;
 
 static struct timeval sleep_enter_time;
+
+static int s_ds18b20_device_num = 0;
+static float s_temperature = 0.0;
+static ds18b20_device_handle_t s_ds18b20s;
 
 /**
  * @brief Initialize the ADC unit
@@ -61,6 +70,45 @@ void start_adc()
     }
 }
 
+
+static void ds18b20_sensor_detect(void)
+{
+    // install 1-wire bus
+    onewire_bus_handle_t bus = NULL;
+    onewire_bus_config_t bus_config = {
+        .bus_gpio_num = EXAMPLE_ONEWIRE_BUS_GPIO,
+    };
+    onewire_bus_rmt_config_t rmt_config = {
+        .max_rx_bytes = 10, // 1byte ROM command + 8byte ROM number + 1byte device command
+    };
+    ESP_ERROR_CHECK(onewire_new_bus_rmt(&bus_config, &rmt_config, &bus));
+
+    onewire_device_iter_handle_t iter = NULL;
+    onewire_device_t next_onewire_device;
+    esp_err_t search_result = ESP_OK;
+
+    // create 1-wire device iterator, which is used for device search
+    ESP_ERROR_CHECK(onewire_new_device_iter(bus, &iter));
+    ESP_LOGI(TAG, "Device iterator created, start searching...");
+
+    search_result = onewire_device_iter_get_next(iter, &next_onewire_device);
+    if (search_result == ESP_OK) { // found a new device, let's check if we can upgrade it to a DS18B20
+        ds18b20_config_t ds_cfg = {};
+        // check if the device is a DS18B20, if so, return the ds18b20 handle
+        if (ds18b20_new_device(&next_onewire_device, &ds_cfg, &s_ds18b20s) == ESP_OK) {
+            ESP_LOGI(TAG, "Found a DS18B20[%d], address: %016llX", s_ds18b20_device_num, next_onewire_device.address);
+        } else {
+            ESP_LOGI(TAG, "Found an unknown device, address: %016llX", next_onewire_device.address);
+        }
+    }
+    else
+    {
+        ESP_LOGE(TAG, "No device found");
+    }
+    
+    ESP_ERROR_CHECK(onewire_del_device_iter(iter));
+}
+
 /**
  * @brief Deinitialize the ADC unit
  */
@@ -73,6 +121,69 @@ void stop_adc()
     }
 }
 
+
+static bool example_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle)
+{
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    bool calibrated = false;
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Curve Fitting");
+        adc_cali_curve_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .chan = channel,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (!calibrated) {
+        ESP_LOGI(TAG, "calibration scheme version is %s", "Line Fitting");
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            calibrated = true;
+        }
+    }
+#endif
+
+    *out_handle = handle;
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration Success");
+    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+        ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
+    } else {
+        ESP_LOGE(TAG, "Invalid arg or no memory");
+    }
+
+    return calibrated;
+}
+
+static void example_adc_calibration_deinit(adc_cali_handle_t handle)
+{
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    ESP_LOGI(TAG, "deregister %s calibration scheme", "Curve Fitting");
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
+
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    ESP_LOGI(TAG, "deregister %s calibration scheme", "Line Fitting");
+    ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
+#endif
+}
+
+
 /**
  * @brief Configure a given ADC channel
  * @param channel ADC channel to configure
@@ -84,6 +195,7 @@ void adc1_config(adc_channel_t channel)
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, channel, &config));
+    example_adc_calibration_init(ADC_UNIT_1, channel, ADC_ATTEN_DB_12, &adc1_cali_handle);
 }
 
 /**
@@ -94,6 +206,11 @@ void adc1_config(adc_channel_t channel)
 void adc1_read(adc_channel_t channel, int *val)
 {
     ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, channel, val));
+}
+
+void adc1_read_voltage(int adc_raw, int *voltage)
+{
+    ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_handle, adc_raw, voltage));
 }
 
 /**
@@ -108,20 +225,9 @@ void device_init()
     gpio_set_direction(ESP32_S3_TEMPERATURE_ADC_PIN, GPIO_MODE_INPUT);
 
     start_adc();
-    ntc_config_t ntc_config = {
-        .b_value = 3950,
-        .r25_ohm = 10000,
-        .fixed_ohm = 10000,
-        .vdd_mv = 3300,
-        .circuit_mode = CIRCUIT_MODE_NTC_GND,
-        .atten = ADC_ATTEN_DB_11,
-        .channel = ESP32_S3_TEMPERATURE_ADC_CHANNEL,
-        .unit = ADC_UNIT_1};
-
-    ESP_ERROR_CHECK(ntc_dev_create(&ntc_config, &ntc, &adc1_handle));
-    // ESP_ERROR_CHECK(ntc_dev_get_adc_handle(ntc, &adc_handle));
-
     adc1_config(ESP32_S3_BATTERY_ADC_CHANNEL);
+
+    ds18b20_sensor_detect();
 }
 
 /**
@@ -183,13 +289,18 @@ void task_tx(void *pvParameters)
     uint32_t id = esp_random();
 
     TickType_t nowTick = xTaskGetTickCount();
-    float temp = 0.0;
-    int voltage = 0.0;
-    ntc_dev_get_temperature(ntc, &temp);
-    adc1_read(ESP32_S3_BATTERY_ADC_CHANNEL, &voltage);
+    int adc_raw = 0, voltage =0;
+    ESP_ERROR_CHECK(ds18b20_trigger_temperature_conversion(s_ds18b20s));
+    ESP_ERROR_CHECK(ds18b20_get_temperature(s_ds18b20s, &s_temperature));
+    ESP_LOGI(TAG, "temperature read from DS18B20: %.2fC", s_temperature);
+    adc1_read(ESP32_S3_BATTERY_ADC_CHANNEL, &adc_raw);
+    ESP_LOGI(TAG, "Adc raw: %d", adc_raw);
+    adc1_read_voltage(adc_raw, &voltage);
+    ESP_LOGI(TAG, "Battery voltage: %d", voltage);
+
     voltage = map(voltage, 0, 4095, 0, 100);
 
-    int txLen = sprintf((char *)buf, "[%lu] ID %lu TEMP %f BAT %d", nowTick, id, temp, voltage);
+    int txLen = sprintf((char *)buf, "[%lu] ID %lu TEMP %f BAT %d", nowTick, id, s_temperature, voltage);
     ESP_LOGI(TAG, "%d byte packet sent...", txLen);
     ESP_LOGI(TAG, "Payload: %s", buf);
 
